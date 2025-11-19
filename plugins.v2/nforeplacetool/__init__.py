@@ -1,102 +1,72 @@
-import time
-from typing import Any, List, Dict, Tuple, Optional
+import os
+import re
+import threading
+from typing import Any, List, Dict, Tuple
 
-from app.core.event import eventmanager, Event
-from app.helper.mediaserver import MediaServerHelper
 from app.log import logger
 from app.plugins import _PluginBase
-from app.schemas import WebhookEventInfo, ServiceInfo
-from app.schemas.types import EventType, MediaType, MediaImageType, NotificationType
-from app.utils.web import WebUtils
 
 
-class MediaServerMsg(_PluginBase):
+class NfoReplaceTool(_PluginBase):
     # 插件名称
-    plugin_name = "媒体库服务器通知"
+    plugin_name = "NFO标签内容替换"
     # 插件描述
-    plugin_desc = "发送Emby/Jellyfin/Plex服务器的播放、入库等通知消息。"
+    plugin_desc = "对NFO文件的标签内容进行替换"
     # 插件图标
-    plugin_icon = "mediaplay.png"
+    plugin_icon = "https://raw.githubusercontent.com/MrGlaucus/MoviePilot-Plugins/main/icons/nfo.png"
+    # 主题色
+    plugin_color = "#32699D"
     # 插件版本
-    plugin_version = "1.6"
+    plugin_version = "1.0"
     # 插件作者
-    plugin_author = "jxxghp"
+    plugin_author = "MrGlaucus"
     # 作者主页
-    author_url = "https://github.com/jxxghp"
+    author_url = "https://github.com/MrGlaucus"
     # 插件配置项ID前缀
-    plugin_config_prefix = "mediaservermsg_"
+    plugin_config_prefix = "nforeplacetool_"
     # 加载顺序
-    plugin_order = 14
+    plugin_order = 1
     # 可使用的用户级别
     auth_level = 1
 
     # 私有属性
     _enabled = False
-    _add_play_link = False
-    _mediaservers = None
-    _types = []
-    _webhook_msg_keys = {}
-
-    # 拼装消息内容
-    _webhook_actions = {
-        "library.new": "新入库",
-        "system.webhooktest": "测试",
-        "playback.start": "开始播放",
-        "playback.stop": "停止播放",
-        "user.authenticated": "登录成功",
-        "user.authenticationfailed": "登录失败",
-        "media.play": "开始播放",
-        "media.stop": "停止播放",
-        "PlaybackStart": "开始播放",
-        "PlaybackStop": "停止播放",
-        "item.rate": "标记了"
-    }
-    _webhook_images = {
-        "emby": "https://emby.media/notificationicon.png",
-        "plex": "https://www.plex.tv/wp-content/uploads/2022/04/new-logo-process-lines-gray.png",
-        "jellyfin": "https://play-lh.googleusercontent.com/SCsUK3hCCRqkJbmLDctNYCfehLxsS4ggD1ZPHIFrrAN1Tn9yhjmGMPep2D9lMaaa9eQi"
-    }
+    _all_path = ""
+    _is_running = False
+    _threads = []
 
     def init_plugin(self, config: dict = None):
-
         if config:
             self._enabled = config.get("enabled")
-            self._types = config.get("types") or []
-            self._mediaservers = config.get("mediaservers") or []
-            self._add_play_link = config.get("add_play_link", False)
+            self._all_path = config.get("all_path")
 
-    def service_infos(self, type_filter: Optional[str] = None) -> Optional[Dict[str, ServiceInfo]]:
-        """
-        服务信息
-        """
-        if not self._mediaservers:
-            logger.warning("尚未配置媒体服务器，请检查配置")
-            return None
+        if self._enabled and not self._is_running:
+            self._is_running = True
+            for path_line in self._all_path.split('\n'):
+                # 解析格式为 "path|tag_name|old_value|new_value" 的行
+                parts = path_line.split('|')
+                if len(parts) >= 4:
+                    path = parts[0].strip()
+                    tag_name = parts[1].strip()
+                    old_value = parts[2].strip()
+                    new_value = parts[3].strip()
 
-        services = MediaServerHelper().get_services(type_filter=type_filter, name_filters=self._mediaservers)
-        if not services:
-            logger.warning("获取媒体服务器实例失败，请检查配置")
-            return None
+                    # 检查必要参数是否为空
+                    if not tag_name or not old_value:
+                        logger.warn(f"跳过无效行: {path_line} (标签名或旧值为空)")
+                        continue
+                        
+                    if os.path.exists(path):
+                        thread = threading.Thread(target=self.process_all_nfo_files, args=(path, tag_name, old_value, new_value))
+                        thread.start()
+                        self._threads.append(thread)
+            self.update_config({
+                "enabled": False,
+                "all_path": self._all_path,
+            })
 
-        active_services = {}
-        for service_name, service_info in services.items():
-            if service_info.instance.is_inactive():
-                logger.warning(f"媒体服务器 {service_name} 未连接，请检查配置")
-            else:
-                active_services[service_name] = service_info
-
-        if not active_services:
-            logger.warning("没有已连接的媒体服务器，请检查配置")
-            return None
-
-        return active_services
-
-    def service_info(self, name: str) -> Optional[ServiceInfo]:
-        """
-        服务信息
-        """
-        service_infos = self.service_infos() or {}
-        return service_infos.get(name)
+        if self._enabled:
+            logger.info(f"nfo 文件监控开始, version: {self.plugin_version}")
 
     def get_state(self) -> bool:
         return self._enabled
@@ -108,19 +78,11 @@ class MediaServerMsg(_PluginBase):
     def get_api(self) -> List[Dict[str, Any]]:
         pass
 
+    # 插件配置页面
     def get_form(self) -> Tuple[List[dict], Dict[str, Any]]:
         """
         拼装插件配置页面，需要返回两块数据：1、页面配置；2、数据结构
         """
-        types_options = [
-            {"title": "新入库", "value": "library.new"},
-            {"title": "开始播放", "value": "playback.start|media.play|PlaybackStart"},
-            {"title": "停止播放", "value": "playback.stop|media.stop|PlaybackStop"},
-            {"title": "用户标记", "value": "item.rate"},
-            {"title": "测试", "value": "system.webhooktest"},
-            {"title": "登录成功", "value": "user.authenticated"},
-            {"title": "登录失败", "value": "user.authenticationfailed"},
-        ]
         return [
             {
                 'component': 'VForm',
@@ -143,22 +105,6 @@ class MediaServerMsg(_PluginBase):
                                         }
                                     }
                                 ]
-                            },
-                            {
-                                'component': 'VCol',
-                                'props': {
-                                    'cols': 12,
-                                    'md': 6
-                                },
-                                'content': [
-                                    {
-                                        'component': 'VSwitch',
-                                        'props': {
-                                            'model': 'add_play_link',
-                                            'label': '添加播放链接',
-                                        }
-                                    }
-                                ]
                             }
                         ]
                     },
@@ -172,38 +118,12 @@ class MediaServerMsg(_PluginBase):
                                 },
                                 'content': [
                                     {
-                                        'component': 'VSelect',
+                                        'component': 'VTextarea',
                                         'props': {
-                                            'multiple': True,
-                                            'chips': True,
-                                            'clearable': True,
-                                            'model': 'mediaservers',
-                                            'label': '媒体服务器',
-                                            'items': [{"title": config.name, "value": config.name}
-                                                      for config in MediaServerHelper().get_configs().values()]
-                                        }
-                                    }
-                                ]
-                            }
-                        ]
-                    },
-                    {
-                        'component': 'VRow',
-                        'content': [
-                            {
-                                'component': 'VCol',
-                                'props': {
-                                    'cols': 12,
-                                },
-                                'content': [
-                                    {
-                                        'component': 'VSelect',
-                                        'props': {
-                                            'chips': True,
-                                            'multiple': True,
-                                            'model': 'types',
-                                            'label': '消息类型',
-                                            'items': types_options
+                                            'model': 'all_path',
+                                            'label': 'nfo标签内容替换配置',
+                                            'rows': 5,
+                                            'placeholder': '每一行一个配置，格式为：path|tag_name|old_value|new_value'
                                         }
                                     }
                                 ]
@@ -223,8 +143,24 @@ class MediaServerMsg(_PluginBase):
                                         'component': 'VAlert',
                                         'props': {
                                             'type': 'info',
-                                            'variant': 'tonal',
-                                            'text': '需要设置媒体服务器Webhook，回调相对路径为 /api/v1/webhook?token=API_TOKEN&source=媒体服务器名（3001端口），其中 API_TOKEN 为设置的 API_TOKEN。'
+                                            'variant': 'flat',
+                                            'text': 'path：nfo文件父目录路径（容器路径）,tag_name：标签名称（不含<>），old_value：旧值，new_value：新值，可为空，即替换为空，如：/media/电影|actor|jack|杰克'
+                                        }
+                                    }
+                                ]
+                            },
+                            {
+                                'component': 'VCol',
+                                'props': {
+                                    'cols': 12,
+                                },
+                                'content': [
+                                    {
+                                        'component': 'VAlert',
+                                        'props': {
+                                            'type': 'info',
+                                            'variant': 'flat',
+                                            'text': '执行结束后会自动禁用插件'
                                         }
                                     }
                                 ]
@@ -235,142 +171,52 @@ class MediaServerMsg(_PluginBase):
             }
         ], {
             "enabled": False,
-            "types": []
+            "all_path": "",
         }
 
     def get_page(self) -> List[dict]:
         pass
 
-    @eventmanager.register(EventType.WebhookMessage)
-    def send(self, event: Event):
-        """
-        发送通知消息
-        """
-        if not self._enabled:
-            return
+    @staticmethod
+    def replace_tag_content(file_path, tag_name, old_value, new_value):
+        logger.info(f'正在处理 {file_path}...')
+        with open(file_path, 'r', encoding='utf-8') as file:
+            content = file.read()
+        
+        # 使用正则表达式匹配指定标签内的内容
+        # 匹配<tag_name>...</tag_name>格式的标签
+        pattern = f'<{tag_name}>(.*?)</{tag_name}>'
+        
+        def replace_func(match):
+            inner_content = match.group(1)
+            # 只有当内部内容包含old_value时才替换
+            if old_value in inner_content:
+                return f'<{tag_name}>{inner_content.replace(old_value, new_value)}</{tag_name}>'
+            else:
+                return match.group(0)
+        
+        # 应用替换
+        content = re.sub(pattern, replace_func, content, flags=re.DOTALL)
+        
+        with open(file_path, 'w', encoding='utf-8') as file:
+            file.write(content)
+        logger.info(f'{file_path} 处理完成')
 
-        event_info: WebhookEventInfo = event.event_data
-        if not event_info:
-            return
+    def process_all_nfo_files(self, directory, tag_name, old_value, new_value):
+        logger.info(f'正在处理 {directory} 下的所有 nfo 文件...')
+        for root, dirs, files in os.walk(directory):
+            for file in files:
+                if file.endswith('.nfo'):
+                    file_path = os.path.join(root, file)
+                    self.replace_tag_content(file_path, tag_name, old_value, new_value)
 
-        # 不在支持范围不处理
-        if not self._webhook_actions.get(event_info.event):
-            return
+        logger.info(f'{directory} - 处理完成')
+        self._threads.pop(0)
+        logger.info(f'正在移除线程... 剩余 {len(self._threads)} 个线程')
+        if len(self._threads) == 0:
+            self._is_running = False
+            logger.info(f'任务完成')
 
-        # 不在选中范围不处理
-        msgflag = False
-        for _type in self._types:
-            if event_info.event in _type.split("|"):
-                msgflag = True
-                break
-        if not msgflag:
-            logger.info(f"未开启 {event_info.event} 类型的消息通知")
-            return
-
-        if not self.service_infos():
-            logger.info(f"未开启任一媒体服务器的消息通知")
-            return
-
-        if event_info.server_name and not self.service_info(name=event_info.server_name):
-            logger.info(f"未开启媒体服务器 {event_info.server_name} 的消息通知")
-            return
-
-        if event_info.channel and not self.service_infos(type_filter=event_info.channel):
-            logger.info(f"未开启媒体服务器类型 {event_info.channel} 的消息通知")
-            return
-
-        expiring_key = f"{event_info.item_id}-{event_info.client}-{event_info.user_name}"
-        # 过滤停止播放重复消息
-        if str(event_info.event) == "playback.stop" and expiring_key in self._webhook_msg_keys.keys():
-            # 刷新过期时间
-            self.__add_element(expiring_key)
-            return
-
-        # 消息标题
-        if event_info.item_type in ["TV", "SHOW"]:
-            message_title = f"{self._webhook_actions.get(event_info.event)}剧集 {event_info.item_name}"
-        elif event_info.item_type == "MOV":
-            message_title = f"{self._webhook_actions.get(event_info.event)}电影 {event_info.item_name}"
-        elif event_info.item_type == "AUD":
-            message_title = f"{self._webhook_actions.get(event_info.event)}有声书 {event_info.item_name}"
-        else:
-            message_title = f"{self._webhook_actions.get(event_info.event)}"
-
-        # 消息内容
-        message_texts = []
-        if event_info.user_name:
-            message_texts.append(f"用户：{event_info.user_name}")
-        if event_info.device_name:
-            message_texts.append(f"设备：{event_info.client} {event_info.device_name}")
-        if event_info.ip:
-            message_texts.append(f"IP地址：{event_info.ip} {WebUtils.get_location(event_info.ip)}")
-        if event_info.percentage:
-            percentage = round(float(event_info.percentage), 2)
-            message_texts.append(f"进度：{percentage}%")
-        if event_info.overview:
-            message_texts.append(f"剧情：{event_info.overview}")
-        message_texts.append(f"时间：{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))}")
-
-        # 消息内容
-        message_content = "\n".join(message_texts)
-
-        # 消息图片
-        image_url = event_info.image_url
-        # 查询剧集图片
-        if event_info.tmdb_id:
-            season_id = event_info.season_id if event_info.season_id else None
-            episode_id = event_info.episode_id if event_info.episode_id else None
-
-            specific_image = self.chain.obtain_specific_image(
-                mediaid=event_info.tmdb_id,
-                mtype=MediaType.TV,
-                image_type=MediaImageType.Backdrop,
-                season=season_id,
-                episode=episode_id
-            )
-            if specific_image:
-                image_url = specific_image
-        # 使用默认图片
-        if not image_url:
-            image_url = self._webhook_images.get(event_info.channel)
-
-        play_link = None
-        if self._add_play_link:
-            if event_info.server_name:
-                service = self.service_infos().get(event_info.server_name)
-                if service:
-                    play_link = service.instance.get_play_url(event_info.item_id)
-            elif event_info.channel:
-                services = MediaServerHelper().get_services(type_filter=event_info.channel)
-                for service in services.values():
-                    play_link = service.instance.get_play_url(event_info.item_id)
-                    if play_link:
-                        break
-
-        if str(event_info.event) == "playback.stop":
-            # 停止播放消息，添加到过期字典
-            self.__add_element(expiring_key)
-        if str(event_info.event) == "playback.start":
-            # 开始播放消息，删除过期字典
-            self.__remove_element(expiring_key)
-
-        # 发送消息
-        self.post_message(mtype=NotificationType.MediaServer,
-                          title=message_title, text=message_content, image=image_url, link=play_link)
-
-    def __add_element(self, key, duration=600):
-        expiration_time = time.time() + duration
-        # 如果元素已经存在，更新其过期时间
-        self._webhook_msg_keys[key] = expiration_time
-
-    def __remove_element(self, key):
-        self._webhook_msg_keys = {k: v for k, v in self._webhook_msg_keys.items() if k != key}
-
-    def __get_elements(self):
-        current_time = time.time()
-        # 过滤掉过期的元素
-        self._webhook_msg_keys = {k: v for k, v in self._webhook_msg_keys.items() if v > current_time}
-        return list(self._webhook_msg_keys.keys())
 
     def stop_service(self):
         """
