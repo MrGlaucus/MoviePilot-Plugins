@@ -573,12 +573,12 @@
     }
   },
   "NfoReplaceTool": {
-    "name": "Bug反馈",
-    "description": "自动上报异常，协助开发者发现和解决问题。",
-    "labels": "开发",
+    "name": "NFO标签内容替换",
+    "description": "对NFO文件的标签内容进行替换",
+    "labels": "NFO",
     "version": "1.0",
-    "icon": "Alist_encrypt_A.png",
-    "author": "jxxghp",
+    "icon": "nfo.png",
+    "author": "MrGlaucus",
     "level": 1,
     "history": {
       "v1.0": "初始版本"
