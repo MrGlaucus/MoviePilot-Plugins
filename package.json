@@ -3,11 +3,12 @@
     "name": "NFO标签内容替换",
     "description": "对NFO文件的标签内容进行替换",
     "labels": "NFO",
-    "version": "1.0",
+    "version": "1.1",
     "icon": "nfo.png",
     "author": "MrGlaucus",
     "level": 1,
     "history": {
+      "v1.1": "旧值支持正则表达式",
       "v1.0": "初始版本"
     }
   }

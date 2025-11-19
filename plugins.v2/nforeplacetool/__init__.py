@@ -17,7 +17,7 @@ class NfoReplaceTool(_PluginBase):
     # 主题色
     plugin_color = "#32699D"
     # 插件版本
-    plugin_version = "1.0"
+    plugin_version = "1.1"
     # 插件作者
     plugin_author = "MrGlaucus"
     # 作者主页
@@ -64,9 +64,6 @@ class NfoReplaceTool(_PluginBase):
                 "enabled": False,
                 "all_path": self._all_path,
             })
-
-        if self._enabled:
-            logger.info(f"nfo 文件监控开始, version: {self.plugin_version}")
 
     def get_state(self) -> bool:
         return self._enabled
@@ -144,7 +141,7 @@ class NfoReplaceTool(_PluginBase):
                                         'props': {
                                             'type': 'info',
                                             'variant': 'flat',
-                                            'text': 'path：nfo文件父目录路径（容器路径）,tag_name：标签名称（不含<>），old_value：旧值，new_value：新值，可为空，即替换为空，如：/media/电影|actor|jack|杰克'
+                                            'text': 'path：nfo文件父目录路径（容器路径）,tag_name：标签名称（不含<>），old_value：旧值，new_value：新值，可为空，即替换为空，如：/media/电影|actor|jack|杰克，old_value可填写正则表达式'
                                         }
                                     }
                                 ]
@@ -189,11 +186,19 @@ class NfoReplaceTool(_PluginBase):
         
         def replace_func(match):
             inner_content = match.group(1)
-            # 只有当内部内容包含old_value时才替换
-            if old_value in inner_content:
-                return f'<{tag_name}>{inner_content.replace(old_value, new_value)}</{tag_name}>'
-            else:
-                return match.group(0)
+            # 尝试将old_value作为正则表达式处理
+            try:
+                # 编译正则表达式以检查其有效性
+                re.compile(old_value)
+                # 如果编译成功，则使用正则表达式替换
+                replaced_content = re.sub(old_value, new_value, inner_content)
+                return f'<{tag_name}>{replaced_content}</{tag_name}>'
+            except re.error:
+                # 如果编译失败，则使用普通字符串替换
+                if old_value in inner_content:
+                    return f'<{tag_name}>{inner_content.replace(old_value, new_value)}</{tag_name}>'
+                else:
+                    return match.group(0)
         
         # 应用替换
         content = re.sub(pattern, replace_func, content, flags=re.DOTALL)
