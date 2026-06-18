@@ -829,7 +829,7 @@ class ReleaseGroupStats(_PluginBase):
                                 {
                                     'component': 'div',
                                     'props': {'class': 'font-weight-bold'},
-                                    'content': [f"#{rank} {name}"]
+                                    'text': f"#{rank} {name}"
                                 }
                             ]
                         },
@@ -840,7 +840,7 @@ class ReleaseGroupStats(_PluginBase):
                                 {
                                     'component': 'div',
                                     'props': {'class': 'text-grey'},
-                                    'content': [f"{data['count']} 个文件 ({percentage:.1f}%)"]
+                                    'text': f"{data['count']} 个文件 ({percentage:.1f}%)"
                                 }
                             ]
                         },
@@ -850,7 +850,7 @@ class ReleaseGroupStats(_PluginBase):
                             'content': [
                                 {
                                     'component': 'div',
-                                    'content': [self._format_size(data["size_bytes"])]
+                                    'text': self._format_size(data["size_bytes"])
                                 }
                             ]
                         }
@@ -892,12 +892,12 @@ class ReleaseGroupStats(_PluginBase):
                                                     {
                                                         'component': 'div',
                                                         'props': {'class': 'text-caption text-grey'},
-                                                        'content': ['总文件数']
+                                                        'text': '总文件数'
                                                     },
                                                     {
                                                         'component': 'div',
                                                         'props': {'class': 'text-h4'},
-                                                        'content': [str(stats.get('total_files', 0))]
+                                                        'text': str(stats.get('total_files', 0))
                                                     }
                                                 ]
                                             }
@@ -919,12 +919,12 @@ class ReleaseGroupStats(_PluginBase):
                                                     {
                                                         'component': 'div',
                                                         'props': {'class': 'text-caption text-grey'},
-                                                        'content': ['总大小']
+                                                        'text': '总大小'
                                                     },
                                                     {
                                                         'component': 'div',
                                                         'props': {'class': 'text-h4'},
-                                                        'content': [self._format_size(stats.get('total_size_bytes', 0))]
+                                                        'text': self._format_size(stats.get('total_size_bytes', 0))
                                                     }
                                                 ]
                                             }
@@ -946,12 +946,12 @@ class ReleaseGroupStats(_PluginBase):
                                                     {
                                                         'component': 'div',
                                                         'props': {'class': 'text-caption text-grey'},
-                                                        'content': ['发布组数量']
+                                                        'text': '发布组数量'
                                                     },
                                                     {
                                                         'component': 'div',
                                                         'props': {'class': 'text-h4'},
-                                                        'content': [str(len(stats.get('groups', {})))]
+                                                        'text': str(len(stats.get('groups', {})))
                                                     }
                                                 ]
                                             }
@@ -973,12 +973,12 @@ class ReleaseGroupStats(_PluginBase):
                                                     {
                                                         'component': 'div',
                                                         'props': {'class': 'text-caption text-grey'},
-                                                        'content': ['扫描耗时']
+                                                        'text': '扫描耗时'
                                                     },
                                                     {
                                                         'component': 'div',
                                                         'props': {'class': 'text-h4'},
-                                                        'content': [f"{stats.get('scan_duration_seconds', 0)} 秒"]
+                                                        'text': f"{stats.get('scan_duration_seconds', 0)} 秒"
                                                     }
                                                 ]
                                             }
@@ -1022,7 +1022,7 @@ class ReleaseGroupStats(_PluginBase):
                                         'content': [
                                             {
                                                 'component': 'VCardTitle',
-                                                'content': ['发布组详细列表']
+                                                'text': '发布组详细列表'
                                             },
                                             {
                                                 'component': 'VDivider'
