@@ -11,7 +11,6 @@ from app.log import logger
 from app.plugins import _PluginBase
 from app.schemas.types import EventType
 from app.core.event import eventmanager, Event
-from app.core.cache import cached
 
 
 class ReleaseGroupStats(_PluginBase):
@@ -334,19 +333,14 @@ class ReleaseGroupStats(_PluginBase):
                 json.dump(stats, f, ensure_ascii=False, indent=2)
             logger.debug(f"统计数据已保存到 {stats_path}")
             
-            # 更新内存中的数据，而不是清除缓存
+            # 更新内存中的数据
             self._stats_data = stats
-            
-            # 只在必要时清除缓存（避免频繁IO）
-            if hasattr(self._load_stats, 'cache_clear'):
-                self._load_stats.cache_clear()
         except Exception as e:
             logger.error(f"保存统计数据失败: {e}", exc_info=True)
     
-    @cached(region="releasegroup_stats", ttl=300, skip_none=True)
     def _load_stats(self) -> Dict:
         """
-        从 JSON 文件加载统计数据（带缓存）
+        从 JSON 文件加载统计数据
         
         Returns:
             统计数据字典，失败返回空字典
@@ -355,7 +349,11 @@ class ReleaseGroupStats(_PluginBase):
             stats_path = os.path.join(self.get_data_path(), self.STATS_FILE)
             if os.path.exists(stats_path):
                 with open(stats_path, 'r', encoding='utf-8') as f:
-                    return json.load(f)
+                    data = json.load(f)
+                    logger.debug(f"成功加载统计数据: {len(data.get('groups', {}))} 个发布组")
+                    return data
+            else:
+                logger.debug(f"统计数据文件不存在: {stats_path}")
         except Exception as e:
             logger.error(f"加载统计数据失败: {e}", exc_info=True)
         
