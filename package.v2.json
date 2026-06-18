@@ -7,6 +7,7 @@
     "icon": "nfo.png",
     "author": "MrGlaucus",
     "level": 1,
+    "release": true,
     "history": {
       "v1.1": "旧值支持正则表达式",
       "v1.0": "初始版本"
@@ -20,6 +21,7 @@
     "icon": "Ptools_B.png",
     "author": "MrGlaucus",
     "level": 1,
+    "release": true,
     "history": {
       "v1.0": "初始版本"
     }
