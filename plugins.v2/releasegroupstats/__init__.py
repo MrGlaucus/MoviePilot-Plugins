@@ -817,40 +817,58 @@ class ReleaseGroupStats(_PluginBase):
         
         for rank, (name, data) in enumerate(sorted_groups, 1):
             percentage = (data["count"] / stats["total_files"] * 100) if stats["total_files"] > 0 else 0
-            group_items.append({
-                'component': 'VListItem',
-                'props': {'density': 'compact'},
-                'content': [
-                    {
-                        'component': 'VListItemTitle',
-                        'content': [
-                            {
-                                'component': 'span',
-                                'props': {'class': 'font-weight-bold me-2'},
-                                'content': [f"#{rank} {name}"]
-                            },
-                            {
-                                'component': 'span',
-                                'props': {'class': 'text-grey'},
-                                'content': [f"{data['count']} 个文件 ({percentage:.1f}%)"]
-                            }
-                        ]
-                    },
-                    {
-                        'component': 'VListItemSubtitle',
-                        'content': [self._format_size(data["size_bytes"])]
-                    },
-                    {
-                        'component': 'VProgressLinear',
-                        'props': {
-                            'modelValue': percentage,
-                            'height': 4,
-                            'color': 'primary',
-                            'class': 'mt-1'
+            group_items.extend([
+                {
+                    'component': 'VRow',
+                    'props': {'class': 'align-center ma-0 pa-2'},
+                    'content': [
+                        {
+                            'component': 'VCol',
+                            'props': {'cols': 12, 'sm': 4},
+                            'content': [
+                                {
+                                    'component': 'div',
+                                    'props': {'class': 'font-weight-bold'},
+                                    'content': [f"#{rank} {name}"]
+                                }
+                            ]
+                        },
+                        {
+                            'component': 'VCol',
+                            'props': {'cols': 6, 'sm': 4},
+                            'content': [
+                                {
+                                    'component': 'div',
+                                    'props': {'class': 'text-grey'},
+                                    'content': [f"{data['count']} 个文件 ({percentage:.1f}%)"]
+                                }
+                            ]
+                        },
+                        {
+                            'component': 'VCol',
+                            'props': {'cols': 6, 'sm': 4},
+                            'content': [
+                                {
+                                    'component': 'div',
+                                    'content': [self._format_size(data["size_bytes"])]
+                                }
+                            ]
                         }
+                    ]
+                },
+                {
+                    'component': 'VProgressLinear',
+                    'props': {
+                        'modelValue': percentage,
+                        'height': 6,
+                        'color': 'primary',
+                        'class': 'mx-2 mb-2'
                     }
-                ]
-            })
+                },
+                {
+                    'component': 'VDivider'
+                }
+            ])
         
         return [
             {
@@ -1011,13 +1029,7 @@ class ReleaseGroupStats(_PluginBase):
                                             },
                                             {
                                                 'component': 'VCardText',
-                                                'content': [
-                                                    {
-                                                        'component': 'VList',
-                                                        'props': {'density': 'compact'},
-                                                        'content': group_items
-                                                    }
-                                                ]
+                                                'content': group_items
                                             }
                                         ]
                                     }
