@@ -221,9 +221,19 @@ class ReleaseGroupStats(_PluginBase):
             logger.warning(f"目录不存在: {directory}")
             return files
         
+        if not os.path.isdir(directory):
+            logger.warning(f"路径不是目录: {directory}")
+            return files
+        
+        logger.info(f"开始扫描目录: {directory}")
+        dir_count = 0
+        file_count = 0
+        
         try:
             for root, dirs, filenames in os.walk(directory):
+                dir_count += 1
                 for filename in filenames:
+                    file_count += 1
                     # 检查扩展名
                     ext = os.path.splitext(filename)[1].lower()
                     if ext in extensions:
@@ -236,11 +246,16 @@ class ReleaseGroupStats(_PluginBase):
                                 "mtime": stat.st_mtime
                             })
                         except (PermissionError, OSError) as e:
-                            logger.warning(f"无法访问文件 {filepath}: {e}")
+                            logger.debug(f"无法访问文件 {filepath}: {e}")
         except Exception as e:
             logger.error(f"扫描目录 {directory} 失败: {e}", exc_info=True)
         
-        logger.info(f"目录 {directory} 扫描完成，找到 {len(files)} 个文件")
+        logger.info(
+            f"目录 {directory} 扫描完成: "
+            f"遍历 {dir_count} 个子目录, "
+            f"检查 {file_count} 个文件, "
+            f"匹配 {len(files)} 个视频文件"
+        )
         return files
     
     def _analyze_files(self, file_list: List[Dict]) -> Dict:
@@ -400,6 +415,9 @@ class ReleaseGroupStats(_PluginBase):
                 logger.warn("未配置扫描目录")
                 return
             
+            logger.info(f"开始扫描 {len(paths)} 个目录: {paths}")
+            logger.info(f"使用扩展名过滤: {extensions}")
+            
             # 2. 扫描所有目录
             all_files = []
             for path in paths:
@@ -410,6 +428,7 @@ class ReleaseGroupStats(_PluginBase):
                 try:
                     files = self._scan_directory(path, extensions)
                     all_files.extend(files)
+                    logger.info(f"累计文件数: {len(all_files)}")
                 except Exception as e:
                     logger.error(f"扫描目录 {path} 失败: {str(e)}", exc_info=True)
             
