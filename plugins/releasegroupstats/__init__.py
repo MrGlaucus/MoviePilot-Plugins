@@ -45,6 +45,7 @@ class ReleaseGroupStats(_PluginBase):
     _custom_extensions = ""
     _is_scanning = False
     _stats_data = {}
+    _last_scan_time = 0  # 上次扫描时间戳
     
     # 常量定义
     DEFAULT_VIDEO_EXTENSIONS = [
