@@ -139,6 +139,11 @@ class ReleaseGroupStats(_PluginBase):
         # 加载已保存的统计数据
         self._stats_data = self._load_stats()
         
+        # 从统计数据中恢复上次扫描时间
+        if self._stats_data and 'last_scan_timestamp' in self._stats_data:
+            self._last_scan_time = self._stats_data['last_scan_timestamp']
+            logger.info(f"恢复上次扫描时间: {datetime.fromtimestamp(self._last_scan_time).strftime('%Y-%m-%d %H:%M:%S')}")
+        
         logger.info(f"发布组统计插件初始化完成，启用状态: {self._enabled}")
     
     def get_state(self) -> bool:
@@ -458,26 +463,17 @@ class ReleaseGroupStats(_PluginBase):
             
             # 4. 添加元数据
             stats['last_scan_time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            stats['last_scan_timestamp'] = time.time()  # 保存时间戳用于防抖
             stats['scan_duration_seconds'] = round(time.time() - start_time, 2)
             
             # 5. 保存结果
             self._save_stats(stats)
             self._stats_data = stats
             
-            # 6. 发送通知
+            # 6. 记录日志（不发送通知，避免触发事件循环）
             logger.info(
                 f"扫描完成: {stats['total_files']} 个文件, "
-                f"耗时 {stats['scan_duration_seconds']} 秒"
-            )
-            self.post_message(
-                title="发布组统计完成",
-                text=f"共扫描 {stats['total_files']} 个文件，"
-                     f"耗时 {stats['scan_duration_seconds']} 秒",
-                buttons=[
-                    [
-                        {"text": "📊 查看详情", "callback_data": f"[PLUGIN]{self.__class__.__name__}|view_details"}
-                    ]
-                ]
+                f"耗时 {stats['scan_duration_seconds']} 秒。"
             )
             
         except Exception as e:
