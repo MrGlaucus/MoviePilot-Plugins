@@ -797,24 +797,18 @@ class ReleaseGroupStats(_PluginBase):
         if not self._stats_data:
             return [
                 {
-                    'component': 'VAlert',
+                    'component': 'div',
                     'props': {
-                        'type': 'info',
-                        'variant': 'tonal'
+                        'class': 'text-center',
                     },
-                    'content': [
-                        {
-                            'component': 'span',
-                            'content': ['暂无统计数据，请先执行扫描']
-                        }
-                    ]
+                    'text': '暂无统计数据，请先执行扫描'
                 }
             ]
         
         stats = self._stats_data
         
-        # 构建发布组表格行
-        group_rows = []
+        # 构建发布组列表
+        group_items = []
         sorted_groups = sorted(
             stats.get("groups", {}).items(),
             key=lambda x: x[1]["count"],
@@ -823,62 +817,48 @@ class ReleaseGroupStats(_PluginBase):
         
         for rank, (name, data) in enumerate(sorted_groups, 1):
             percentage = (data["count"] / stats["total_files"] * 100) if stats["total_files"] > 0 else 0
-            group_rows.append({
-                'component': 'VTr',
+            group_items.append({
+                'component': 'VListItem',
+                'props': {'density': 'compact'},
                 'content': [
                     {
-                        'component': 'VTd',
-                        'content': [str(rank)]
+                        'component': 'VListItemTitle',
+                        'content': [
+                            {
+                                'component': 'span',
+                                'props': {'class': 'font-weight-bold me-2'},
+                                'content': [f"#{rank} {name}"]
+                            },
+                            {
+                                'component': 'span',
+                                'props': {'class': 'text-grey'},
+                                'content': [f"{data['count']} 个文件 ({percentage:.1f}%)"]
+                            }
+                        ]
                     },
                     {
-                        'component': 'VTd',
-                        'content': [name]
-                    },
-                    {
-                        'component': 'VTd',
-                        'content': [str(data["count"])]
-                    },
-                    {
-                        'component': 'VTd',
-                        'content': [f"{percentage:.1f}%"]
-                    },
-                    {
-                        'component': 'VTd',
+                        'component': 'VListItemSubtitle',
                         'content': [self._format_size(data["size_bytes"])]
                     },
                     {
-                        'component': 'VTd',
-                        'content': [
-                            {
-                                'component': 'VBtn',
-                                'props': {
-                                    'size': 'x-small',
-                                    'variant': 'text',
-                                    'color': 'primary'
-                                },
-                                'events': {
-                                    'click': f"showFiles('{name}')"
-                                },
-                                'content': [
-                                    {
-                                        'component': 'VIcon',
-                                        'content': ['mdi-eye']
-                                    }
-                                ]
-                            }
-                        ]
+                        'component': 'VProgressLinear',
+                        'props': {
+                            'modelValue': percentage,
+                            'height': 4,
+                            'color': 'primary',
+                            'class': 'mt-1'
+                        }
                     }
                 ]
             })
         
         return [
             {
-                'component': 'VContainer',
+                'component': 'div',
                 'content': [
                     # 概览卡片
                     {
                         'component': 'VRow',
-                        'props': {'class': 'mb-3'},
                         'content': [
                             {
                                 'component': 'VCol',
@@ -990,11 +970,10 @@ class ReleaseGroupStats(_PluginBase):
                             }
                         ]
                     },
-                    
                     # 最近扫描时间
                     {
                         'component': 'VRow',
-                        'props': {'class': 'mb-3'},
+                        'props': {'class': 'mt-3 mb-3'},
                         'content': [
                             {
                                 'component': 'VCol',
@@ -1006,19 +985,13 @@ class ReleaseGroupStats(_PluginBase):
                                             'type': 'info',
                                             'variant': 'tonal'
                                         },
-                                        'content': [
-                                            {
-                                                'component': 'span',
-                                                'content': [f"最近扫描时间: {stats.get('last_scan_time', '从未')}"]
-                                            }
-                                        ]
+                                        'text': f"最近扫描时间: {stats.get('last_scan_time', '从未')}"
                                     }
                                 ]
                             }
                         ]
                     },
-                    
-                    # 发布组表格
+                    # 发布组列表
                     {
                         'component': 'VRow',
                         'content': [
@@ -1031,40 +1004,18 @@ class ReleaseGroupStats(_PluginBase):
                                         'content': [
                                             {
                                                 'component': 'VCardTitle',
-                                                'content': [
-                                                    {
-                                                        'component': 'span',
-                                                        'content': ['发布组详细列表']
-                                                    }
-                                                ]
+                                                'content': ['发布组详细列表']
+                                            },
+                                            {
+                                                'component': 'VDivider'
                                             },
                                             {
                                                 'component': 'VCardText',
                                                 'content': [
                                                     {
-                                                        'component': 'VTable',
-                                                        'content': [
-                                                            {
-                                                                'component': 'THead',
-                                                                'content': [
-                                                                    {
-                                                                        'component': 'VTr',
-                                                                        'content': [
-                                                                            {'component': 'VTh', 'content': ['排名']},
-                                                                            {'component': 'VTh', 'content': ['发布组']},
-                                                                            {'component': 'VTh', 'content': ['文件数']},
-                                                                            {'component': 'VTh', 'content': ['占比']},
-                                                                            {'component': 'VTh', 'content': ['大小']},
-                                                                            {'component': 'VTh', 'content': ['操作']}
-                                                                        ]
-                                                                    }
-                                                                ]
-                                                            },
-                                                            {
-                                                                'component': 'TBody',
-                                                                'content': group_rows
-                                                            }
-                                                        ]
+                                                        'component': 'VList',
+                                                        'props': {'density': 'compact'},
+                                                        'content': group_items
                                                     }
                                                 ]
                                             }
