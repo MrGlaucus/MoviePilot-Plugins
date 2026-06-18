@@ -326,10 +326,14 @@ class ReleaseGroupStats(_PluginBase):
             stats_path = os.path.join(self.get_data_path(), self.STATS_FILE)
             with open(stats_path, 'w', encoding='utf-8') as f:
                 json.dump(stats, f, ensure_ascii=False, indent=2)
-            logger.info(f"统计数据已保存到 {stats_path}")
+            logger.debug(f"统计数据已保存到 {stats_path}")
             
-            # 清除缓存，确保下次读取最新数据
-            self._load_stats.cache_clear()
+            # 更新内存中的数据，而不是清除缓存
+            self._stats_data = stats
+            
+            # 只在必要时清除缓存（避免频繁IO）
+            if hasattr(self._load_stats, 'cache_clear'):
+                self._load_stats.cache_clear()
         except Exception as e:
             logger.error(f"保存统计数据失败: {e}", exc_info=True)
     
