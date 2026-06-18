@@ -400,9 +400,16 @@ class ReleaseGroupStats(_PluginBase):
     def _execute_scan(self):
         """执行扫描任务（后台线程）"""
         if self._is_scanning:
-            logger.warn("扫描正在进行中，请勿重复触发")
+            logger.warning("扫描正在进行中，跳过本次执行")
             return
         
+        # 检查上次执行时间，防止过于频繁的执行（最小间隔60秒）
+        current_time = time.time()
+        if hasattr(self, '_last_scan_time') and (current_time - self._last_scan_time) < 60:
+            logger.warning(f"距离上次扫描仅 {int(current_time - self._last_scan_time)} 秒，跳过本次执行（最小间隔60秒）")
+            return
+        
+        self._last_scan_time = current_time
         self._is_scanning = True
         start_time = time.time()
         
