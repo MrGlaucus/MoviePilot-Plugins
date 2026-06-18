@@ -11,5 +11,17 @@
       "v1.1": "旧值支持正则表达式",
       "v1.0": "初始版本"
     }
+  },
+  "ReleaseGroupStats": {
+    "name": "发布组统计",
+    "description": "扫描目录并按发布组分类统计影视资源",
+    "labels": "统计,发布组",
+    "version": "1.0",
+    "icon": "Ptools_B.png",
+    "author": "MrGlaucus",
+    "level": 1,
+    "history": {
+      "v1.0": "初始版本"
+    }
   }
 }
