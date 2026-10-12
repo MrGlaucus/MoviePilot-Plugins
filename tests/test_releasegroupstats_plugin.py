@@ -236,6 +236,30 @@ class PluginTests(unittest.TestCase):
         page = json.dumps(plugin.get_page(), ensure_ascii=False)
         self.assertIn('第 2 / 2 页', page)
 
+    def test_running_page_refreshes_until_worker_finishes(self):
+        for version in ['v2', 'v3']:
+            with self.subTest(version=version):
+                module, plugin = self.plugin(version)
+                entered, release = threading.Event(), threading.Event()
+                original = module.scanner.scan
+                def delayed(*args, **kwargs):
+                    entered.set()
+                    release.wait(3)
+                    return original(*args, **kwargs)
+                with patch.object(module.scanner, 'scan', side_effect=delayed):
+                    plugin.start_scan()
+                    self.assertTrue(entered.wait(1))
+                    running = json.dumps(plugin.get_page(), ensure_ascii=False)
+                    self.assertIn('update:modelValue', running)
+                    self.assertIn('plugin/ReleaseGroupStats/status', running)
+                    release.set()
+                    plugin._thread.join(2)
+                completed = json.dumps(plugin.get_page(), ensure_ascii=False)
+                self.assertIn('扫描完成', completed)
+                self.assertNotIn('VSnackbar', completed)
+                self.assertNotIn('indeterminate', completed)
+                self.assertFalse(plugin.get_status().data.running)
+
     def test_podium_contains_only_three_highest_groups(self):
         module, _ = self.plugin()
         stats = {'total_files': 10, 'total_size_bytes': 10, 'groups': {

@@ -18,7 +18,7 @@ class ReleaseGroupStats(_PluginBase):
     plugin_desc = '扫描媒体目录，统计发布组文件数量与逻辑容量'
     plugin_icon = 'https://raw.githubusercontent.com/MrGlaucus/MoviePilot-Plugins/main/icons/Ptools_B.png'
     plugin_color = '#4F6BED'
-    plugin_version = '1.1.0'
+    plugin_version = '1.1.1'
     plugin_author = 'MrGlaucus'
     author_url = 'https://github.com/MrGlaucus'
     plugin_config_prefix = 'releasegroupstats_'

@@ -113,13 +113,24 @@ def page(stats, status, plugin_id, keyword='', view=None):
                       prependIcon=icon, **{'class': 'mr-2 mb-2'})
         button['events'] = {'click': {'api': f'plugin/{plugin_id}/{endpoint}', 'method': method}}
         controls.append(button)
-    content = [node('div', content=[node('div', '媒体库 · 发布组分布', **{'class': 'text-h5 font-weight-bold mb-2'}),
-                                   node('VChip', state_labels.get(status.state, status.state), color='primary', variant='tonal',
-                                        **{'class': 'mb-3'})] + controls),
+    content = [node('div', '媒体库 · 发布组分布', **{'class': 'text-h5 font-weight-bold mb-2'}),
+               node('div', content=[node('VChip', state_labels.get(status.state, status.state), color='primary', variant='tonal',
+                                        **{'class': 'mr-4 mb-2 flex-shrink-0'})] + controls,
+                    **{'class': 'd-flex align-center flex-wrap', 'style': 'column-gap:8px'}),
                node('div', f'最近成功扫描：{stats.get("last_scan_time", "尚未扫描")} · 按文件计数，容量为逻辑大小',
                     **{'class': 'text-caption text-medium-emphasis mb-4'})]
     if status.running:
-        content += [node('VProgressLinear', indeterminate=True, color='primary', **{'class': 'mb-3'}),
+        # PageRender has no polling hook. A native snackbar's timeout emits the
+        # supported API event, which reloads the page. Hide its visual surface;
+        # unmounting the page cancels the timer, and terminal pages omit it.
+        refresh_timer = node('VSnackbar', modelValue=True, timeout=5000,
+                             **{'style': 'display:none', 'aria-hidden': 'true'})
+        refresh_timer['events'] = {'update:modelValue': {
+            'api': f'plugin/{plugin_id}/status', 'method': 'get'}}
+        content.append(refresh_timer)
+        content += [node('div', '扫描期间每 5 秒刷新状态，完成后自动停止刷新。',
+                         **{'class': 'text-caption text-medium-emphasis mb-2'}),
+                    node('VProgressLinear', indeterminate=True, color='primary', **{'class': 'mb-3'}),
                     node('VAlert', f'已检查 {status.checked_files:,} 个文件，发现 {status.video_files:,} 个视频，读取错误 {status.error_count}',
                          type='info', variant='tonal', **{'class': 'mb-3'})]
     if status.message:
