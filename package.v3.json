@@ -1,0 +1,16 @@
+{
+  "ReleaseGroupStats": {
+    "name": "发布组统计",
+    "description": "扫描媒体目录，统计发布组文件数量与逻辑容量",
+    "labels": "统计,发布组",
+    "version": "2.0.0",
+    "icon": "https://raw.githubusercontent.com/MrGlaucus/MoviePilot-Plugins/main/icons/Ptools_B.png",
+    "author": "MrGlaucus",
+    "level": 1,
+    "release": true,
+    "history": {
+      "v2.0.0": "独立适配 MoviePilot V3 SDK，支持实例隔离、扫描状态与原生统计页面"
+    },
+    "system_version": ">=3.0.0"
+  }
+}

@@ -15,15 +15,18 @@
   },
   "ReleaseGroupStats": {
     "name": "发布组统计",
-    "description": "扫描目录并按发布组分类统计影视资源",
+    "description": "扫描媒体目录，统计发布组文件数量与逻辑容量",
     "labels": "统计,发布组",
-    "version": "1.0",
-    "icon": "Ptools_B.png",
+    "version": "1.1.0",
+    "icon": "https://raw.githubusercontent.com/MrGlaucus/MoviePilot-Plugins/main/icons/Ptools_B.png",
     "author": "MrGlaucus",
     "level": 1,
     "release": true,
     "history": {
+      "v1.1.0": "修复识别、目录去重、任务取消和数据保存；优化详情与仪表板",
       "v1.0": "初始版本"
-    }
+    },
+    "v3": false,
+    "system_version": ">=2.0.0,<3"
   }
 }

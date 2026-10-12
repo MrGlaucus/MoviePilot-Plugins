@@ -1,6 +1,16 @@
 # MoviePilot-Plugins
 MoviePilot官方插件市场：https://github.com/jxxghp/MoviePilot-Plugins
 
+## 本仓库发布组统计插件
+
+发布组统计现提供 V2 1.1.0 与 V3 2.0.0 独立实现，支持目录去重、可取消扫描、自定义识别规则、原生排名表和仪表板。
+
+- [V2 使用说明](plugins.v2/releasegroupstats/README.md)
+- [V3 使用说明](plugins.v3/releasegroupstats/README.md)
+- [升级验证与宿主验收](docs/releasegroupstats-validation.md)
+
+发布工作流按各代索引精确打包；推送新增版本时发布，已有 Release 不覆盖。
+
 ## 目录
 - [第三方插件库开发说明](#第三方插件库开发说明)
   - [1. 目录结构](#1-目录结构)

@@ -1,1042 +1,260 @@
-import os
-import re
+"""Release group statistics: managed tasks, native pages and stable APIs."""
 import json
-import time
-import threading
-from datetime import datetime
-from typing import Any, List, Dict, Tuple, Optional
 from pathlib import Path
-
+import threading
+from apscheduler.triggers.cron import CronTrigger
 from app.log import logger
 from app.plugins import _PluginBase
-from app.schemas.types import EventType
+from app.core.config import settings
 from app.core.event import eventmanager, Event
+from app.schemas.types import EventType
+from . import scanner, ui
+from .models import RankingView, ScanStatus, StatusResponse
 
 
 class ReleaseGroupStats(_PluginBase):
-    """发布组统计插件"""
-    
-    # 插件名称
-    plugin_name = "发布组统计"
-    # 插件描述
-    plugin_desc = "扫描目录并按发布组分类统计影视资源"
-    # 插件图标
-    plugin_icon = "https://raw.githubusercontent.com/MrGlaucus/MoviePilot-Plugins/main/icons/Ptools_B.png"
-    # 主题色
-    plugin_color = "#4CAF50"
-    # 插件版本
-    plugin_version = "1.0"
-    # 插件作者
-    plugin_author = "MrGlaucus"
-    # 作者主页
-    author_url = "https://github.com/MrGlaucus"
-    # 插件配置项ID前缀
-    plugin_config_prefix = "releasegroupstats_"
-    # 加载顺序
+    """Scan mounted media directories and aggregate release group distributions."""
+    plugin_name = '发布组统计'
+    plugin_desc = '扫描媒体目录，统计发布组文件数量与逻辑容量'
+    plugin_icon = 'https://raw.githubusercontent.com/MrGlaucus/MoviePilot-Plugins/main/icons/Ptools_B.png'
+    plugin_color = '#4F6BED'
+    plugin_version = '1.1.0'
+    plugin_author = 'MrGlaucus'
+    author_url = 'https://github.com/MrGlaucus'
+    plugin_config_prefix = 'releasegroupstats_'
     plugin_order = 10
-    # 可使用的用户级别
     auth_level = 1
-    
-    # 私有属性
-    _enabled = False
-    _scan_paths = ""
-    _cron = ""
-    _custom_extensions = ""
-    _is_scanning = False
-    _stats_data = {}
-    _last_scan_time = 0  # 上次扫描时间戳
-    
-    # 常量定义
-    DEFAULT_VIDEO_EXTENSIONS = [
-        '.mkv', '.mp4', '.avi', '.iso', '.ts',
-        '.flv', '.wmv', '.mov', '.m4v', '.webm'
-    ]
-    
-    # 统计数据文件路径
-    STATS_FILE = "stats_data.json"
-    
-    # 发布组字典
-    RELEASE_GROUPS: Dict[str, List[str]] = {
-        "0ff": ['FF(?:(?:A|WE)B|CD|E(?:DU|B)|TV)'],
-        "1pt": [],
-        "52pt": [],
-        "观众": ['Audies', r'\bAD(?:Audio|E(?:book|)|Music|Web)\b'],
-        "azusa": [],
-        "备胎": ['BeiTai'],
-        "学校": ['Bts(?:CHOOL|HD|PAD|TV)', 'Zone'],
-        "carpt": ['CarPT'],
-        "彩虹岛": ['CHD(?:Bits|PAD|(?:|HK)TV|WEB|)', 'StBOX', 'OneHD', 'Lee', 'xiaopie'],
-        "碟粉": ['discfan'],
-        "dragonhd": [],
-        "eastgame": ['(?:(?:iNT|(?:HALFC|Mini(?:S|H|FH)D))-|)TLF'],
-        "filelist": [],
-        "gainbound": ['(?:DG|GBWE)B'],
-        "hares": ['Hares(?:(?:M|T)V|Web|)'],
-        "hd4fans": [],
-        "高清视界": ['HDA(?:pad|rea|TV)', 'EPiC'],
-        "阿童木": ['hdatmos'],
-        "hdbd": [],
-        "hdchina": ['HDC(?:hina|TV|)', 'k9611', 'tudou', 'iHD'],
-        "杜比": ['D(?:ream|BTV)', '(?:HD|QHstudI)o'],
-        "红豆饭": ['beAst(?:TV|)', 'HDFans'],
-        "家园": ['HDH(?:ome|Pad|TV|WEB|)'],
-        "hdpt": ['HDPT(?:Web|)'],
-        "天空": ['HDS(?:ky|TV|Pad|WEB|)', 'AQLJ'],
-        "高清时间": ['hdtime'],
-        "HDU": [],
-        "hdvideo": [],
-        "hdzone": ['HDZ(?:one|)'],
-        "憨憨": ['HHWEB'],
-        "末日": ['AGSV(PT|WEB|MUS)'],
-        "hitpt": [],
-        "htpt": ['HTPT'],
-        "iptorrents": [],
-        "joyhd": [],
-        "朋友": ['FRDS', 'Yumi', 'cXcY'],
-        "柠檬": ['L(?:eague(?:(?:C|H)D|(?:M|T)V|NF|WEB)|HD)', 'i18n', 'CiNT'],
-        "馒头": ['MTeam(?:TV|)', 'MPAD', 'MWeb'],
-        "nanyangpt": [],
-        "老师": ['nicept'],
-        "oshen": [],
-        "我堡": ['Our(?:Bits|TV)', 'FLTTH', 'PbK', 'MGs', 'iLove(?:HD|TV)'],
-        "猪猪": ['PiGo(?:NF|(?:H|WE)B)'],
-        "铂金学院": ['ptchina'],
-        "猫站": ['PTer(?:DIY|Game|(?:M|T)V|WEB|)'],
-        "pthome": ['PTH(?:Audio|eBook|music|ome|tv|WEB|)'],
-        "ptmsg": [],
-        "烧包": ['PTsbao', 'OPS', 'F(?:Fans(?:AIeNcE|BD|D(?:VD|IY)|TV|WEB)|HDMv)', 'SGXT'],
-        "pttime": [],
-        "葡萄": ['PuTao'],
-        "聆音": ['lingyin'],
-        "春天": [r"CMCT(?:A|V)?", "Oldboys", "GTR", "CLV", "CatEDU", "Telesto", "iFree"],
-        "鲨鱼": ['Shark(?:WEB|DIY|TV|MV|)'],
-        "他吹吹风": ['tccf'],
-        "北洋园": ['TJUPT'],
-        "听听歌": ['TTG', 'WiKi', 'NGB', 'DoA', '(?:ARi|ExRE)N'],
-        "U2": [],
-        "ultrahd": [],
-        "others": ['B(?:MDru|eyondHD|TN)', 'C(?:fandora|trlhd|MRG)', 'DON', 'EVO', 'FLUX', 'HONE(?:yG|)',
-                   'N(?:oGroup|T(?:b|G))', 'PandaMoon', 'SMURF', 'T(?:EPES|aengoo|rollHD )'],
-        "anime": [r'\bANi\b', r'\bHYSUB\b', r'\bKTXP\b', 'LoliHouse', r'\bMCE\b', 'Nekomoe kissaten', 'SweetSub', 'MingY',
-                  '(?:Lilith|NC|AI)-Raws', 'VCB-Stuido', '织梦字幕组', '枫叶字幕组', '猎户手抄部', '喵萌奶茶屋', '漫猫字幕社',
-                  '霜庭云花Sub', '北宇治字幕组', '氢气烤肉架', '云歌字幕组', '萌樱字幕组', '极影字幕社',
-                  '悠哈璃羽字幕社',
-                  '拨雪寻春', '沸羊羊(?:制作|字幕组)', '(?:桜|樱)都字幕组'],
-        "青蛙": ['FROG(?:E|Web|)'],
-        "ubits": ['UB(?:its|WEB|TV)'],
-        "影巢": ['HiveWeb'],
-    }
-    
-    def init_plugin(self, config: dict = None):
-        """初始化插件"""
-        if config:
-            self._enabled = config.get("enabled", False)
-            self._scan_paths = config.get("scan_paths", "")
-            self._cron = config.get("cron", "")
-            self._custom_extensions = config.get("custom_extensions", "")
-        
-        # 加载已保存的统计数据
-        self._stats_data = self._load_stats()
-        
-        # 从统计数据中恢复上次扫描时间
-        if self._stats_data and 'last_scan_timestamp' in self._stats_data:
-            self._last_scan_time = self._stats_data['last_scan_timestamp']
-            logger.info(f"恢复上次扫描时间: {datetime.fromtimestamp(self._last_scan_time).strftime('%Y-%m-%d %H:%M:%S')}")
-        
-        logger.info(f"发布组统计插件初始化完成，启用状态: {self._enabled}")
-    
-    def get_state(self) -> bool:
-        """获取插件状态"""
-        return self._enabled
-    
-    def get_dashboard_meta(self) -> Optional[List[Dict[str, str]]]:
-        """
-        获取插件仪表盘元信息
-        """
-        return [{
-            "key": "stats",  # 仪表盘的key
-            "name": "发布组统计"  # 仪表盘的名称
-        }]
-    
-    @staticmethod
-    def get_command() -> List[Dict[str, Any]]:
-        """
-        注册插件远程命令
-        """
-        return [{
-            "cmd": "/release_group_scan",
-            "event": EventType.PluginAction,
-            "desc": "发布组统计扫描",
-            "category": "插件功能",
-            "data": {
-                "action": "release_group_scan"
-            }
-        }]
-    
-    def _match_release_group(self, filename: str) -> str:
-        """
-        基于文件名匹配发布组
-        
-        Args:
-            filename: 文件名（含扩展名）
-        
-        Returns:
-            发布组名称，未匹配返回"其它"
-        """
-        if not filename:
-            return "其它"
-        
-        # 提取文件名（不含扩展名）
-        name_part = Path(filename).stem
-        
-        # 遍历发布组字典
-        for group_name, alias_list in self.RELEASE_GROUPS.items():
-            # 尝试匹配每个别名
-            for alias in alias_list:
-                try:
-                    if re.search(alias, name_part, re.IGNORECASE):
-                        return group_name
-                except re.error as e:
-                    logger.warning(
-                        f"无效正则表达式: '{alias}' for group '{group_name}'. "
-                        f"Error: {e}"
-                    )
-                    continue
-            
-            # 检查组名本身
-            if group_name.upper() in name_part.upper():
-                return group_name
-        
-        return "其它"
-    
-    def _scan_directory(self, directory: str, extensions: List[str]) -> List[Dict]:
-        """
-        递归扫描目录中的视频文件
-        
-        Args:
-            directory: 要扫描的目录路径
-            extensions: 允许的文件扩展名列表
-        
-        Returns:
-            文件信息列表，每项包含 path, size, mtime
-        """
-        files = []
-        
-        if not os.path.exists(directory):
-            logger.warning(f"目录不存在: {directory}")
-            return files
-        
-        if not os.path.isdir(directory):
-            logger.warning(f"路径不是目录: {directory}")
-            return files
-        
-        logger.info(f"开始扫描目录: {directory}")
-        dir_count = 0
-        file_count = 0
-        
+    STATS_FILE = 'stats_data.json'
+
+    def __init__(self):
+        """Keep task resources and mutable state local to each plugin instance."""
+        super().__init__()
+        self._lock = threading.RLock()
+        self._lifecycle = threading.RLock()
+        self._cancel = threading.Event()
+        self._thread = None
+        self._stopped = True
+        self._enabled = False
+        self._stats_data = {}
+        self._state = 'idle'
+        self._message = ''
+        self._warnings = []
+        self._checked = self._videos = self._errors = 0
+        self._config = {}
+        self._view = RankingView()
+        self._trigger = None
+        self._matcher = scanner.Matcher()
+
+    def init_plugin(self, config=None):
+        """Stop the old task before replacing configuration and loading a snapshot."""
+        with self._lifecycle:
+            self.stop_service()
+            with self._lock:
+                self._config = dict(config or {})
+                self._enabled = bool(self._config.get('enabled', False))
+                self._warnings = []
+                self._trigger = None
+                self._message = ''
+                self._checked = self._videos = self._errors = 0
+                if self._thread and self._thread.is_alive():
+                    self._enabled = False
+                    self._warnings = ['旧扫描仍在等待文件系统响应，请稍后重新保存配置']
+                    return
+                self._cancel = threading.Event()
+                self._stopped = False
+                self._state = 'idle'
+                self._matcher = scanner.Matcher(self._config.get('custom_rules') or '')
+                self._warnings.extend(self._matcher.errors)
+                cron = (self._config.get('cron') or '').strip()
+                if cron:
+                    try:
+                        self._trigger = CronTrigger.from_crontab(cron, timezone=settings.TZ)
+                    except (ValueError, TypeError) as exc:
+                        self._warnings.append(f'定时表达式无效：{exc}')
+                self._load_stats()
+                once = bool(self._config.get('onlyonce'))
+                if once:
+                    self._config['onlyonce'] = False
+                    self.update_config(dict(self._config))
+            if once:
+                response = self._schedule_once()
+                if not response.success:
+                    with self._lock:
+                        self._message = response.message
+
+    def _schedule_once(self):
+        """Start the explicitly requested one-shot task using the managed worker."""
+        return self.start_scan()
+
+    def _remove_once(self):
+        """V2 has no pending host one-shot job to remove."""
+
+    def _load_stats(self):
+        """Restore legacy JSON; a corrupt snapshot cannot break plugin loading."""
         try:
-            for root, dirs, filenames in os.walk(directory):
-                dir_count += 1
-                for filename in filenames:
-                    file_count += 1
-                    # 检查扩展名
-                    ext = os.path.splitext(filename)[1].lower()
-                    if ext in extensions:
-                        filepath = os.path.join(root, filename)
-                        try:
-                            stat = os.stat(filepath)
-                            files.append({
-                                "path": filepath,
-                                "size": stat.st_size,
-                                "mtime": stat.st_mtime
-                            })
-                        except (PermissionError, OSError) as e:
-                            logger.debug(f"无法访问文件 {filepath}: {e}")
-        except Exception as e:
-            logger.error(f"扫描目录 {directory} 失败: {e}", exc_info=True)
-        
-        logger.info(
-            f"目录 {directory} 扫描完成: "
-            f"遍历 {dir_count} 个子目录, "
-            f"检查 {file_count} 个文件, "
-            f"匹配 {len(files)} 个视频文件"
-        )
-        return files
-    
-    def _analyze_files(self, file_list: List[Dict]) -> Dict:
-        """
-        分析文件列表，按发布组统计
-        
-        Args:
-            file_list: 文件信息列表
-        
-        Returns:
-            统计结果字典
-        """
-        stats = {
-            "total_files": 0,
-            "total_size_bytes": 0,
-            "groups": {}
-        }
-        
-        # 遍历所有文件
-        for file_info in file_list:
-            filename = os.path.basename(file_info["path"])
-            group_name = self._match_release_group(filename)
-            
-            # 初始化组统计
-            if group_name not in stats["groups"]:
-                stats["groups"][group_name] = {
-                    "count": 0,
-                    "size_bytes": 0,
-                    "files": []
-                }
-            
-            # 累加统计
-            stats["groups"][group_name]["count"] += 1
-            stats["groups"][group_name]["size_bytes"] += file_info["size"]
-            stats["groups"][group_name]["files"].append(file_info["path"])
-            
-            # 更新总计
-            stats["total_files"] += 1
-            stats["total_size_bytes"] += file_info["size"]
-        
-        # 生成 Top 5（按文件数量降序）
-        sorted_groups = sorted(
-            stats["groups"].items(),
-            key=lambda x: x[1]["count"],
-            reverse=True
-        )
-        
-        stats["top5"] = []
-        for name, data in sorted_groups[:5]:
-            percentage = (data["count"] / stats["total_files"] * 100) if stats["total_files"] > 0 else 0
-            stats["top5"].append({
-                "name": name,
-                "count": data["count"],
-                "percentage": round(percentage, 1),
-                "size_bytes": data["size_bytes"]
-            })
-        
-        return stats
-    
-    def _save_stats(self, stats: Dict):
-        """
-        保存统计数据到 JSON 文件
-        
-        Args:
-            stats: 统计数据字典
-        """
-        try:
-            stats_path = os.path.join(self.get_data_path(), self.STATS_FILE)
-            with open(stats_path, 'w', encoding='utf-8') as f:
-                json.dump(stats, f, ensure_ascii=False, indent=2)
-            logger.debug(f"统计数据已保存到 {stats_path}")
-            
-            # 更新内存中的数据
-            self._stats_data = stats
-        except Exception as e:
-            logger.error(f"保存统计数据失败: {e}", exc_info=True)
-    
-    def _load_stats(self) -> Dict:
-        """
-        从 JSON 文件加载统计数据
-        
-        Returns:
-            统计数据字典，失败返回空字典
-        """
-        try:
-            stats_path = os.path.join(self.get_data_path(), self.STATS_FILE)
-            if os.path.exists(stats_path):
-                with open(stats_path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    logger.debug(f"成功加载统计数据: {len(data.get('groups', {}))} 个发布组")
-                    return data
-            else:
-                logger.debug(f"统计数据文件不存在: {stats_path}")
-        except Exception as e:
-            logger.error(f"加载统计数据失败: {e}", exc_info=True)
-        
-        return {}
-    
-    def _format_size(self, size_bytes: int) -> str:
-        """
-        格式化文件大小
-        
-        Args:
-            size_bytes: 字节数
-        
-        Returns:
-            格式化字符串，如 "1.2 GB"
-        """
-        if size_bytes < 1024:
-            return f"{size_bytes} B"
-        elif size_bytes < 1024 ** 2:
-            return f"{size_bytes / 1024:.1f} KB"
-        elif size_bytes < 1024 ** 3:
-            return f"{size_bytes / 1024 ** 2:.1f} MB"
-        elif size_bytes < 1024 ** 4:
-            return f"{size_bytes / 1024 ** 3:.1f} GB"
-        else:
-            return f"{size_bytes / 1024 ** 4:.2f} TB"
-    
-    def _get_video_extensions(self) -> List[str]:
-        """
-        获取视频文件扩展名列表
-        
-        Returns:
-            扩展名列表（小写）
-        """
-        if self._custom_extensions and self._custom_extensions.strip():
-            # 解析用户自定义扩展名（每行一个）
-            extensions = []
-            for line in self._custom_extensions.split('\n'):
-                ext = line.strip().lower()
-                if ext and not ext.startswith('#'):
-                    # 确保以 . 开头
-                    if not ext.startswith('.'):
-                        ext = '.' + ext
-                    extensions.append(ext)
-            return extensions if extensions else self.DEFAULT_VIDEO_EXTENSIONS
-        
-        return self.DEFAULT_VIDEO_EXTENSIONS
-    
-    def _execute_scan(self):
-        """执行扫描任务（后台线程）"""
-        if self._is_scanning:
-            logger.warning("扫描正在进行中，跳过本次执行")
-            return
-        
-        # 检查上次执行时间，防止过于频繁的执行（最小间隔60秒）
-        current_time = time.time()
-        if hasattr(self, '_last_scan_time') and (current_time - self._last_scan_time) < 60:
-            logger.warning(f"距离上次扫描仅 {int(current_time - self._last_scan_time)} 秒，跳过本次执行（最小间隔60秒）")
-            return
-        
-        self._last_scan_time = current_time
-        self._is_scanning = True
-        start_time = time.time()
-        
-        try:
-            # 1. 解析配置
-            paths = [
-                p.strip() 
-                for p in self._scan_paths.split(';') 
-                if p.strip()
-            ]
-            extensions = self._get_video_extensions()
-            
-            if not paths:
-                logger.warn("未配置扫描目录")
+            path = Path(self.get_data_path()) / self.STATS_FILE
+            if not path.exists():
                 return
-            
-            logger.info(f"开始扫描 {len(paths)} 个目录: {paths}")
-            logger.info(f"使用扩展名过滤: {extensions}")
-            
-            # 2. 扫描所有目录
-            all_files = []
-            for path in paths:
-                if not os.path.exists(path):
-                    logger.warn(f"目录不存在: {path}，跳过")
-                    continue
-                
-                try:
-                    files = self._scan_directory(path, extensions)
-                    all_files.extend(files)
-                    logger.info(f"累计文件数: {len(all_files)}")
-                except Exception as e:
-                    logger.error(f"扫描目录 {path} 失败: {str(e)}", exc_info=True)
-            
-            # 3. 统计分析
-            if not all_files:
-                logger.info("未找到任何视频文件")
-                stats = {
-                    "total_files": 0,
-                    "total_size_bytes": 0,
-                    "groups": {},
-                    "top5": []
-                }
-            else:
-                stats = self._analyze_files(all_files)
-            
-            # 4. 添加元数据
-            stats['last_scan_time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            stats['last_scan_timestamp'] = time.time()  # 保存时间戳用于防抖
-            stats['scan_duration_seconds'] = round(time.time() - start_time, 2)
-            
-            # 5. 保存结果
-            self._save_stats(stats)
-            self._stats_data = stats
-            
-            # 6. 记录日志（不发送通知，避免触发事件循环）
-            logger.info(
-                f"扫描完成: {stats['total_files']} 个文件, "
-                f"耗时 {stats['scan_duration_seconds']} 秒。"
-            )
-            
-        except Exception as e:
-            logger.error(f"扫描失败: {str(e)}", exc_info=True)
-        finally:
-            self._is_scanning = False
-    
+            self._stats_data = scanner.validate_snapshot(json.loads(path.read_text(encoding='utf-8')))
+        except (OSError, ValueError, TypeError) as exc:
+            self._warnings.append('历史统计读取失败；请检查数据文件或重新扫描')
+            logger.warning(f'发布组统计读取失败：{exc}')
+
+    def get_state(self):
+        """Expose the configured enable switch to the host."""
+        return self._enabled
+
+    def _status(self):
+        """Build a consistent status object while the instance lock is held."""
+        return ScanStatus(enabled=self._enabled and not self._stopped,
+            running=bool(self._thread and self._thread.is_alive()), state=self._state,
+            checked_files=self._checked, video_files=self._videos, error_count=self._errors,
+            message=self._message, warnings=list(self._warnings),
+            last_scan_time=self._stats_data.get('last_scan_time', ''))
+
+    def _response(self, success=True, message=''):
+        """Use the same declared envelope for all control endpoints."""
+        with self._lock:
+            if not success and message:
+                self._message = message
+            return StatusResponse(success=success, message=message, data=self._status())
+
+    def get_status(self) -> StatusResponse:
+        """Poll task status without changing or clearing its result."""
+        return self._response()
+
+    def set_ranking_view(self, payload: RankingView) -> StatusResponse:
+        """Change transient table ordering and page without rescanning the library."""
+        with self._lock:
+            self._view = payload
+            return self._response()
+
+    def start_scan(self) -> StatusResponse:
+        """Reserve the worker slot atomically before starting a background task."""
+        with self._lock:
+            if self._stopped or not self._enabled:
+                return self._response(False, '请先启用插件')
+            if self._thread and self._thread.is_alive():
+                return self._response(False, '扫描正在进行中')
+            roots = scanner.normalize_paths(self._config.get('scan_paths') or '')
+            if not roots:
+                return self._response(False, '请先配置媒体目录')
+            self._cancel.clear()
+            self._state, self._message = 'running', ''
+            self._checked = self._videos = self._errors = 0
+            allowed = scanner.extensions(self._config.get('custom_extensions') or '')
+            self._thread = threading.Thread(target=self._run_scan, args=(roots, allowed, self._matcher),
+                name=f'{self.__class__.__name__}-scan', daemon=True)
+            try:
+                self._thread.start()
+            except RuntimeError:
+                self._state = 'failed'
+                self._message = '无法启动扫描任务，请稍后重试'
+                return self._response(False, self._message)
+            return self._response(True, '扫描已启动')
+
+    def _progress(self, checked, videos, errors):
+        """Publish bounded counters, without exposing the mutable snapshot."""
+        with self._lock:
+            self._checked, self._videos, self._errors = checked, videos, errors
+
+    def _run_scan(self, roots, allowed, matcher):
+        """Only publish a completed, durably saved and uncancelled snapshot."""
+        try:
+            result = scanner.scan(roots, allowed, matcher, self._cancel, self._progress)
+            with self._lock:
+                if self._cancel.is_set() or self._stopped:
+                    raise scanner.ScanCancelled()
+                scanner.save_snapshot(Path(self.get_data_path()) / self.STATS_FILE, result)
+                self._stats_data = result
+                self._state = 'partial' if result['partial'] else 'completed'
+                self._message = f"扫描完成：{result['total_files']:,} 个视频文件，耗时 {result['scan_duration_seconds']} 秒"
+            logger.info(self._message)
+        except scanner.ScanCancelled:
+            with self._lock:
+                self._state = 'stopped' if self._stopped else 'cancelled'
+                self._message = '扫描已取消，上次结果已保留'
+        except Exception as exc:
+            with self._lock:
+                self._state = 'failed'
+                self._message = '扫描或保存失败，上次结果已保留；请检查目录、权限及日志'
+            logger.error(f'发布组统计扫描失败：{exc}', exc_info=True)
+
+    def cancel_scan(self) -> StatusResponse:
+        """Request cooperative cancellation; keep the slot until the worker exits."""
+        with self._lock:
+            if not self._thread or not self._thread.is_alive():
+                return self._response(False, '当前没有正在执行的扫描')
+            self._cancel.set()
+            self._state = 'cancelling'
+            return self._response(True, '已请求取消扫描')
+
     def stop_service(self):
-        """停止服务"""
-        logger.info("发布组统计插件已停止")
-        self._is_scanning = False
-    
-    def get_form(self) -> Tuple[List[dict], Dict[str, Any]]:
-        """
-        拼装插件配置页面
-        
-        Returns:
-            表单配置和数据结构的元组
-        """
-        return [
-            {
-                'component': 'VForm',
-                'content': [
-                    {
-                        'component': 'VRow',
-                        'content': [
-                            {
-                                'component': 'VCol',
-                                'props': {
-                                    'cols': 12,
-                                    'md': 6
-                                },
-                                'content': [
-                                    {
-                                        'component': 'VSwitch',
-                                        'props': {
-                                            'model': 'enabled',
-                                            'label': '启用插件',
-                                        }
-                                    }
-                                ]
-                            }
-                        ]
-                    },
-                    {
-                        'component': 'VRow',
-                        'content': [
-                            {
-                                'component': 'VCol',
-                                'props': {
-                                    'cols': 12
-                                },
-                                'content': [
-                                    {
-                                        'component': 'VTextarea',
-                                        'props': {
-                                            'model': 'scan_paths',
-                                            'label': '扫描目录',
-                                            'rows': 3,
-                                            'placeholder': '多个目录用分号分隔，如：/media/movies;/media/tvshows'
-                                        }
-                                    }
-                                ]
-                            }
-                        ]
-                    },
-                    {
-                        'component': 'VRow',
-                        'content': [
-                            {
-                                'component': 'VCol',
-                                'props': {
-                                    'cols': 12
-                                },
-                                'content': [
-                                    {
-                                        'component': 'VCronField',
-                                        'props': {
-                                            'model': 'cron',
-                                            'label': '定时任务 (Cron 表达式)',
-                                            'placeholder': '例如: 0 2 * * * (每天凌晨2点)'
-                                        }
-                                    }
-                                ]
-                            }
-                        ]
-                    },
-                    {
-                        'component': 'VRow',
-                        'content': [
-                            {
-                                'component': 'VCol',
-                                'props': {
-                                    'cols': 12
-                                },
-                                'content': [
-                                    {
-                                        'component': 'VTextarea',
-                                        'props': {
-                                            'model': 'custom_extensions',
-                                            'label': '视频文件扩展名 (可选)',
-                                            'rows': 3,
-                                            'placeholder': '每行一个扩展名，留空使用默认值\n.mkv\n.mp4\n.avi'
-                                        }
-                                    }
-                                ]
-                            }
-                        ]
-                    },
-                    {
-                        'component': 'VRow',
-                        'content': [
-                            {
-                                'component': 'VCol',
-                                'props': {
-                                    'cols': 12,
-                                },
-                                'content': [
-                                    {
-                                        'component': 'VAlert',
-                                        'props': {
-                                            'type': 'info',
-                                            'variant': 'flat',
-                                            'text': '提示：目录需使用容器内路径，扫描在后台执行，可在日志查看进度。大目录可能需要较长时间。'
-                                        }
-                                    }
-                                ]
-                            }
-                        ]
-                    }
-                ]
-            }
-        ], {
-            "enabled": False,
-            "scan_paths": "",
-            "cron": "",
-            "custom_extensions": ""
-        }
-    
-    def get_service(self) -> List[Dict[str, Any]]:
-        """
-        注册定时服务
-        
-        Returns:
-            定时任务配置列表
-        """
-        if self._enabled and self._cron:
-            return [{
-                "id": "ReleaseGroupStats",
-                "name": "发布组统计定时任务",
-                "trigger": "cron",
-                "func": self._execute_scan,
-                "args": [],
-                "cron": self._cron
-            }]
-        return []
-    
-    def get_api(self) -> List[Dict[str, Any]]:
-        """
-        注册 API 接口
-        
-        Returns:
-            API 配置列表
-        """
-        return [{
-            "path": "/start_scan",
-            "endpoint": self.start_scan,
-            "methods": ["POST"],
-            "summary": "手动触发扫描"
-        }]
-    
-    def start_scan(self):
-        """
-        手动触发扫描
-        
-        Returns:
-            响应字典
-        """
-        if self._is_scanning:
-            return {"success": False, "message": "扫描正在进行中"}
-        
-        # 在后台线程中执行扫描
-        threading.Thread(target=self._execute_scan, daemon=True).start()
-        return {"success": True, "message": "扫描已启动"}
-    
-    def get_dashboard(self, key: str, **kwargs) -> Optional[Tuple[Dict[str, Any], Dict[str, Any], List[dict]]]:
-        """
-        获取插件仪表盘页面
-        
-        Args:
-            key: 仪表盘key
-        
-        Returns:
-            1. col配置字典 2.全局配置 3.页面元素配置json
-        """
-        if not self._stats_data:
+        """Prevent new work, signal cancellation and wait briefly for the old task."""
+        with self._lifecycle:
+            with self._lock:
+                self._stopped = True
+                self._cancel.set()
+                thread = self._thread
+            self._remove_once()
+            if thread and thread is not threading.current_thread() and thread.is_alive():
+                thread.join(timeout=5)
+            with self._lock:
+                self._state = 'stopped'
+
+    def get_service(self):
+        """Register a validated cron trigger in the host scheduler."""
+        if not self._enabled or not self._trigger or self._stopped:
+            return []
+        return [{'id': f'{self.__class__.__name__}.Scan', 'name': '发布组统计定时扫描',
+                 'trigger': self._trigger, 'func': self.start_scan, 'kwargs': {}}]
+
+    @staticmethod
+    def get_command():
+        """Preserve the existing remote command name."""
+        return [{'cmd': '/release_group_scan', 'event': EventType.PluginAction,
+                 'desc': '发布组统计扫描', 'category': '插件功能',
+                 'data': {'action': 'release_group_scan'}}]
+
+    @eventmanager.register(EventType.PluginAction)
+    def remote_scan(self, event: Event):
+        """Ignore unrelated actions and commands explicitly targeting another instance."""
+        data = (event.event_data or {}) if event else {}
+        if data.get('action') != 'release_group_scan':
+            return
+        if data.get('plugin_id') and data['plugin_id'] != self.__class__.__name__:
+            return
+        response = self.start_scan()
+        logger.info(f'发布组统计命令：{response.message}')
+
+    def get_api(self):
+        """Register authenticated APIs with explicit Pydantic response schemas."""
+        return [{'path': '/' + path, 'endpoint': endpoint, 'methods': [method], 'auth': 'bear',
+                 'summary': title, 'response_model': StatusResponse}
+                for path, endpoint, method, title in [
+                    ('start_scan', self.start_scan, 'POST', '开始发布组扫描'),
+                    ('cancel_scan', self.cancel_scan, 'POST', '取消发布组扫描'),
+                    ('ranking_view', self.set_ranking_view, 'POST', '切换排名排序与页码'),
+                    ('status', self.get_status, 'GET', '读取发布组扫描状态')]]
+
+    def get_form(self):
+        """Return settings and persisted validation warnings."""
+        with self._lock:
+            return ui.form(list(self._warnings))
+
+    def get_page(self):
+        """Render the last successful snapshot alongside current task state."""
+        with self._lock:
+            return ui.page(self._stats_data, self._status(), self.__class__.__name__,
+                           self._config.get('ranking_filter') or '', {'sort': self._view.sort, 'descending': self._view.descending, 'page': self._view.page})
+
+    def get_dashboard_meta(self):
+        """Keep the existing widget identity compatible with saved dashboards."""
+        return [{'key': 'stats', 'name': '发布组统计'}]
+
+    def get_dashboard(self, key='stats', **kwargs):
+        """Provide an empty widget before the first successful scan."""
+        if key not in ('stats', None, ''):
             return None
-        
-        stats = self._stats_data
-        
-        # 构建 Top 5 列表
-        top5_items = []
-        for item in stats.get("top5", [])[:5]:
-            top5_items.append({
-                'component': 'VListItem',
-                'props': {'density': 'compact'},
-                'content': [
-                    {
-                        'component': 'VListItemTitle',
-                        'content': [
-                            {
-                                'component': 'span',
-                                'props': {'class': 'font-weight-bold'},
-                                'content': [item['name']]
-                            },
-                            {
-                                'component': 'span',
-                                'props': {'class': 'text-grey ml-2'},
-                                'content': [f"{item['count']} ({item['percentage']}%)"]
-                            }
-                        ]
-                    },
-                    {
-                        'component': 'VListItemSubtitle',
-                        'content': [self._format_size(item['size_bytes'])]
-                    },
-                    {
-                        'component': 'VProgressLinear',
-                        'props': {
-                            'modelValue': item['percentage'],
-                            'height': 4,
-                            'color': 'primary',
-                            'class': 'mt-1'
-                        }
-                    }
-                ]
-            })
-        
-        # 1. col配置
-        cols = {
-            "cols": 12,
-            "md": 6
-        }
-        
-        # 2. 全局配置
-        attrs = {
-            "refresh": 300,  # 5分钟自动刷新
-            "border": True,
-            "title": "发布组统计",
-            "subtitle": f"最近扫描: {stats.get('last_scan_time', '从未')}"
-        }
-        
-        # 3. 页面配置
-        content = [
-            {
-                'component': 'VCardText',
-                'props': {'class': 'pa-3 pt-0'},
-                'content': [
-                    {
-                        'component': 'VRow',
-                        'content': [
-                            {
-                                'component': 'VCol',
-                                'props': {'cols': 6},
-                                'content': [
-                                    {
-                                        'component': 'div',
-                                        'props': {'class': 'text-caption text-grey'},
-                                        'content': ['总文件数']
-                                    },
-                                    {
-                                        'component': 'div',
-                                        'props': {'class': 'text-h6'},
-                                        'content': [str(stats.get('total_files', 0))]
-                                    }
-                                ]
-                            },
-                            {
-                                'component': 'VCol',
-                                'props': {'cols': 6},
-                                'content': [
-                                    {
-                                        'component': 'div',
-                                        'props': {'class': 'text-caption text-grey'},
-                                        'content': ['总大小']
-                                    },
-                                    {
-                                        'component': 'div',
-                                        'props': {'class': 'text-h6'},
-                                        'content': [self._format_size(stats.get('total_size_bytes', 0))]
-                                    }
-                                ]
-                            }
-                        ]
-                    },
-                    {
-                        'component': 'VDivider',
-                        'props': {'class': 'my-2'}
-                    },
-                    {
-                        'component': 'div',
-                        'props': {'class': 'text-subtitle-2 mb-2'},
-                        'content': ['Top 5 发布组']
-                    },
-                    {
-                        'component': 'VList',
-                        'props': {'density': 'compact'},
-                        'content': top5_items
-                    }
-                ]
-            }
-        ]
-        
-        return cols, attrs, content
-    
-    def get_page(self) -> List[dict]:
-        """
-        获取插件详情页面
-        
-        Returns:
-            页面配置列表
-        """
-        if not self._stats_data:
-            return [
-                {
-                    'component': 'div',
-                    'props': {
-                        'class': 'text-center',
-                    },
-                    'text': '暂无统计数据，请先执行扫描'
-                }
-            ]
-        
-        stats = self._stats_data
-        
-        # 构建发布组列表
-        group_items = []
-        sorted_groups = sorted(
-            stats.get("groups", {}).items(),
-            key=lambda x: x[1]["count"],
-            reverse=True
-        )
-        
-        for rank, (name, data) in enumerate(sorted_groups, 1):
-            percentage = (data["count"] / stats["total_files"] * 100) if stats["total_files"] > 0 else 0
-            group_items.extend([
-                {
-                    'component': 'VRow',
-                    'props': {'class': 'align-center ma-0 pa-2'},
-                    'content': [
-                        {
-                            'component': 'VCol',
-                            'props': {'cols': 12, 'sm': 4},
-                            'content': [
-                                {
-                                    'component': 'div',
-                                    'props': {'class': 'font-weight-bold'},
-                                    'text': f"#{rank} {name}"
-                                }
-                            ]
-                        },
-                        {
-                            'component': 'VCol',
-                            'props': {'cols': 6, 'sm': 4},
-                            'content': [
-                                {
-                                    'component': 'div',
-                                    'props': {'class': 'text-grey'},
-                                    'text': f"{data['count']} 个文件 ({percentage:.1f}%)"
-                                }
-                            ]
-                        },
-                        {
-                            'component': 'VCol',
-                            'props': {'cols': 6, 'sm': 4},
-                            'content': [
-                                {
-                                    'component': 'div',
-                                    'text': self._format_size(data["size_bytes"])
-                                }
-                            ]
-                        }
-                    ]
-                },
-                {
-                    'component': 'VProgressLinear',
-                    'props': {
-                        'modelValue': percentage,
-                        'height': 6,
-                        'color': 'primary',
-                        'class': 'mx-2 mb-2'
-                    }
-                },
-                {
-                    'component': 'VDivider'
-                }
-            ])
-        
-        return [
-            {
-                'component': 'div',
-                'content': [
-                    # 概览卡片
-                    {
-                        'component': 'VRow',
-                        'content': [
-                            {
-                                'component': 'VCol',
-                                'props': {'cols': 12, 'md': 3},
-                                'content': [
-                                    {
-                                        'component': 'VCard',
-                                        'props': {'variant': 'tonal'},
-                                        'content': [
-                                            {
-                                                'component': 'VCardText',
-                                                'content': [
-                                                    {
-                                                        'component': 'div',
-                                                        'props': {'class': 'text-caption text-grey'},
-                                                        'text': '总文件数'
-                                                    },
-                                                    {
-                                                        'component': 'div',
-                                                        'props': {'class': 'text-h4'},
-                                                        'text': str(stats.get('total_files', 0))
-                                                    }
-                                                ]
-                                            }
-                                        ]
-                                    }
-                                ]
-                            },
-                            {
-                                'component': 'VCol',
-                                'props': {'cols': 12, 'md': 3},
-                                'content': [
-                                    {
-                                        'component': 'VCard',
-                                        'props': {'variant': 'tonal'},
-                                        'content': [
-                                            {
-                                                'component': 'VCardText',
-                                                'content': [
-                                                    {
-                                                        'component': 'div',
-                                                        'props': {'class': 'text-caption text-grey'},
-                                                        'text': '总大小'
-                                                    },
-                                                    {
-                                                        'component': 'div',
-                                                        'props': {'class': 'text-h4'},
-                                                        'text': self._format_size(stats.get('total_size_bytes', 0))
-                                                    }
-                                                ]
-                                            }
-                                        ]
-                                    }
-                                ]
-                            },
-                            {
-                                'component': 'VCol',
-                                'props': {'cols': 12, 'md': 3},
-                                'content': [
-                                    {
-                                        'component': 'VCard',
-                                        'props': {'variant': 'tonal'},
-                                        'content': [
-                                            {
-                                                'component': 'VCardText',
-                                                'content': [
-                                                    {
-                                                        'component': 'div',
-                                                        'props': {'class': 'text-caption text-grey'},
-                                                        'text': '发布组数量'
-                                                    },
-                                                    {
-                                                        'component': 'div',
-                                                        'props': {'class': 'text-h4'},
-                                                        'text': str(len(stats.get('groups', {})))
-                                                    }
-                                                ]
-                                            }
-                                        ]
-                                    }
-                                ]
-                            },
-                            {
-                                'component': 'VCol',
-                                'props': {'cols': 12, 'md': 3},
-                                'content': [
-                                    {
-                                        'component': 'VCard',
-                                        'props': {'variant': 'tonal'},
-                                        'content': [
-                                            {
-                                                'component': 'VCardText',
-                                                'content': [
-                                                    {
-                                                        'component': 'div',
-                                                        'props': {'class': 'text-caption text-grey'},
-                                                        'text': '扫描耗时'
-                                                    },
-                                                    {
-                                                        'component': 'div',
-                                                        'props': {'class': 'text-h4'},
-                                                        'text': f"{stats.get('scan_duration_seconds', 0)} 秒"
-                                                    }
-                                                ]
-                                            }
-                                        ]
-                                    }
-                                ]
-                            }
-                        ]
-                    },
-                    # 最近扫描时间
-                    {
-                        'component': 'VRow',
-                        'props': {'class': 'mt-3 mb-3'},
-                        'content': [
-                            {
-                                'component': 'VCol',
-                                'props': {'cols': 12},
-                                'content': [
-                                    {
-                                        'component': 'VAlert',
-                                        'props': {
-                                            'type': 'info',
-                                            'variant': 'tonal'
-                                        },
-                                        'text': f"最近扫描时间: {stats.get('last_scan_time', '从未')}"
-                                    }
-                                ]
-                            }
-                        ]
-                    },
-                    # 发布组列表
-                    {
-                        'component': 'VRow',
-                        'content': [
-                            {
-                                'component': 'VCol',
-                                'props': {'cols': 12},
-                                'content': [
-                                    {
-                                        'component': 'VCard',
-                                        'content': [
-                                            {
-                                                'component': 'VCardTitle',
-                                                'text': '发布组详细列表'
-                                            },
-                                            {
-                                                'component': 'VDivider'
-                                            },
-                                            {
-                                                'component': 'VCardText',
-                                                'content': group_items
-                                            }
-                                        ]
-                                    }
-                                ]
-                            }
-                        ]
-                    }
-                ]
-            }
-        ]
+        with self._lock:
+            return ui.dashboard(self._stats_data, self._status())
